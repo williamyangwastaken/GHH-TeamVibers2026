@@ -1,4 +1,3 @@
-```yaml
 openapi: 3.0.3
 info:
   title: ClearBill AI API
