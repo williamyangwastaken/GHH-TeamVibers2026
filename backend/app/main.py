@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import analysis
+from app.routes import analysis, letters
 from app.routes.errors import ApiError, error_response
 from app.schemas import ErrorCode, ExtractionError
 from app.services.case_store import get_case_store
@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
         allow_credentials=False,
     )
     app.include_router(analysis.router, prefix=API_PREFIX)
+    app.include_router(letters.router, prefix=API_PREFIX)
 
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError):
