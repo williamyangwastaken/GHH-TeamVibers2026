@@ -24,3 +24,6 @@ Thumbs.db
 tmp/
 uploads/
 *.log
+.env
+backend/.env
+*.env
