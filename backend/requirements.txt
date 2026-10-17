@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic>=2.9.0
+python-multipart
+google-genai>=1.0.0
+pypdf
+pytest
+# Required by FastAPI's TestClient (also pulled in by google-genai).
+httpx
