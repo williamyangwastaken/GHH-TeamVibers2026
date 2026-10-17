@@ -137,7 +137,7 @@ h3 { font-size: 16.5px; font-weight: 700; letter-spacing: -.01em; }
 .h-btn { left: calc(61 * var(--u)); top: calc(279 * var(--u)); width: calc(297 * var(--u)); height: calc(39 * var(--u)); border-radius: calc(12 * var(--u)); background: linear-gradient(90deg, #014f41 0%, #025f44 50%, #02704d 100%); color: #fff; display: flex; align-items: center; justify-content: center; gap: calc(8 * var(--u)); font-size: calc(14 * var(--u)); font-weight: 500; text-decoration: none; box-shadow: 0 calc(2 * var(--u)) calc(6 * var(--u)) rgba(1,79,65,.18); transition: filter .15s; }
 .h-btn:hover { filter: brightness(1.08); }
 .h-btn svg { width: calc(16 * var(--u)); height: calc(16 * var(--u)); }
-.h-fine { left: calc(62 * var(--u)); top: calc(334.5 * var(--u)); font-size: calc(11.55 * var(--u)); line-height: 1.2; color: #1e261f; margin: 0; white-space: nowrap; }
+.h-fine { left: calc(62 * var(--u)); top: calc(342.5 * var(--u)); font-size: calc(11.55 * var(--u)); line-height: 1.2; color: #1e261f; margin: 0; white-space: nowrap; }
 .h-note { left: calc(474 * var(--u)); top: calc(70 * var(--u)); font-family: var(--font-hand-stack); font-size: calc(19.5 * var(--u)); line-height: calc(20.5 * var(--u)); color: #161d16; transform: rotate(-11deg); transform-origin: left top; white-space: nowrap; }
 .h-arrow { left: calc(506 * var(--u)); top: calc(136 * var(--u)); width: calc(34 * var(--u)); height: calc(36 * var(--u)); }
 .h-feat { top: calc(440 * var(--u)); display: flex; align-items: center; gap: calc(12 * var(--u)); font-size: calc(11 * var(--u)); line-height: calc(14.6 * var(--u)); color: #171f18; white-space: nowrap; }
@@ -158,7 +158,7 @@ h3 { font-size: 16.5px; font-weight: 700; letter-spacing: -.01em; }
   .h-lead { width: auto; white-space: normal; font-size: 16px; line-height: 1.6; margin-top: 16px; }
   .h-btn { width: 100%; height: 50px; margin-top: 24px; font-size: 16px; border-radius: 14px; }
   .h-btn svg { width: 18px; height: 18px; }
-  .h-fine { margin-top: 12px; font-size: 13px; white-space: normal; }
+  .h-fine { margin-top: 20px; font-size: 13px; white-space: normal; }
   .h-note { display: block; transform: rotate(-6deg); font-size: 22px; line-height: 1.05; margin: 22px 0 -6px auto; width: max-content; position: relative; z-index: 1; }
   .h-feat { display: flex; margin-top: 18px; font-size: 14px; line-height: 1.4; white-space: normal; gap: 14px; }
   .h-feat .ic { width: 40px; height: 40px; }
