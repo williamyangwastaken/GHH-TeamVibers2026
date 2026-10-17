@@ -1,0 +1,183 @@
+{
+  "case_id": "demo-mismatch",
+  "is_demo": true,
+  "documents": [
+    {
+      "id": "doc_bill",
+      "kind": "bill",
+      "filename": "sample-bill.pdf",
+      "pages": 1,
+      "extraction_quality": "complete",
+      "provider_name": "Sample Valley Clinic",
+      "insurer_name": null,
+      "document_date": "2026-10-08",
+      "service_date": "2026-10-01",
+      "claim_number": "DEMO-C100",
+      "total_charges_cents": 92000,
+      "amount_due_cents": 64000,
+      "patient_responsibility_cents": null,
+      "insurance_paid_cents": 18000,
+      "adjustments_cents": 10000,
+      "expected_total_cents": null,
+      "eob_status": null,
+      "line_items": [
+        {
+          "id": "li_bill_1",
+          "description": "Outpatient Visit - Level 4 (Established)",
+          "code": "99214",
+          "service_date": "2026-10-01",
+          "quantity": 1,
+          "unit_amount_cents": 52000,
+          "line_total_cents": 52000,
+          "page": 1,
+          "source_text": "10/01/2026 | 99214 Outpatient Visit L4 | Qty 1 | $520.00"
+        },
+        {
+          "id": "li_bill_2",
+          "description": "Venipuncture / Diagnostic Lab Draw",
+          "code": "36415",
+          "service_date": "2026-10-01",
+          "quantity": 1,
+          "unit_amount_cents": 20000,
+          "line_total_cents": 20000,
+          "page": 1,
+          "source_text": "10/01/2026 | 36415 Venipuncture Lab Draw | Qty 1 | $200.00"
+        },
+        {
+          "id": "li_bill_3",
+          "description": "Venipuncture / Diagnostic Lab Draw",
+          "code": "36415",
+          "service_date": "2026-10-01",
+          "quantity": 1,
+          "unit_amount_cents": 20000,
+          "line_total_cents": 20000,
+          "page": 1,
+          "source_text": "10/01/2026 | 36415 Venipuncture Lab Draw | Qty 1 | $200.00"
+        }
+      ],
+      "extraction_warnings": []
+    },
+    {
+      "id": "doc_eob",
+      "kind": "eob",
+      "filename": "sample-eob.pdf",
+      "pages": 1,
+      "extraction_quality": "complete",
+      "provider_name": "Sample Valley Clinic",
+      "insurer_name": "Fictional Mutual Health",
+      "document_date": "2026-10-07",
+      "service_date": "2026-10-01",
+      "claim_number": "DEMO-C100",
+      "total_charges_cents": 92000,
+      "amount_due_cents": null,
+      "patient_responsibility_cents": 39000,
+      "insurance_paid_cents": 33000,
+      "adjustments_cents": 20000,
+      "expected_total_cents": null,
+      "eob_status": "finalized",
+      "line_items": [
+        {
+          "id": "li_eob_1",
+          "description": "Office/Outpatient Visit Est (99214)",
+          "code": "99214",
+          "service_date": "2026-10-01",
+          "quantity": 1,
+          "unit_amount_cents": 52000,
+          "line_total_cents": 52000,
+          "page": 1,
+          "source_text": "Claim DEMO-C100 | 99214 | Billed $520.00 | Patient Resp $290.00"
+        },
+        {
+          "id": "li_eob_2",
+          "description": "Routine Venipuncture (36415)",
+          "code": "36415",
+          "service_date": "2026-10-01",
+          "quantity": 1,
+          "unit_amount_cents": 20000,
+          "line_total_cents": 20000,
+          "page": 1,
+          "source_text": "Claim DEMO-C100 | 36415 | Billed $200.00 | Patient Resp $100.00"
+        }
+      ],
+      "extraction_warnings": []
+    }
+  ],
+  "findings": [
+    {
+      "id": "f-eob-1",
+      "rule_id": "R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH",
+      "category": "insurance_comparison",
+      "status": "needs_review",
+      "severity": "medium",
+      "title": "Statement amount due and EOB patient responsibility differ",
+      "explanation": "For matching Claim DEMO-C100 (service date 2026-10-01), the provider statement shows a current balance due of $640.00, while the finalized EOB lists $390.00 in patient responsibility. This $250.00 difference warrants clarification; it does not prove an improper charge.",
+      "alternative_explanations": [
+        "An insurance payment or contractual adjustment on the EOB (dated 2026-10-07) may not yet be posted to the provider statement (dated 2026-10-08).",
+        "The provider statement balance may include prior balances or services from a separate claim."
+      ],
+      "next_step": "Ask the provider billing office for an updated itemized account statement that reconciles the $640.00 balance with the finalized EOB for Claim DEMO-C100.",
+      "difference_cents": 25000,
+      "evidence": [
+        {
+          "document_id": "doc_bill",
+          "page": 1,
+          "line_item_id": null,
+          "field": "amount_due_cents",
+          "amount_cents": 64000,
+          "source_text": "Current Account Balance Due: $640.00 (Claim DEMO-C100)",
+          "verification_note": "Verify against sample-bill.pdf, page 1"
+        },
+        {
+          "document_id": "doc_eob",
+          "page": 1,
+          "line_item_id": null,
+          "field": "patient_responsibility_cents",
+          "amount_cents": 39000,
+          "source_text": "Total Patient Responsibility (Finalized): $390.00 (Claim DEMO-C100)",
+          "verification_note": "Verify against sample-eob.pdf, page 1"
+        }
+      ],
+      "missing_information": []
+    },
+    {
+      "id": "f-dup-1",
+      "rule_id": "R3_POSSIBLE_DUPLICATE_LINE_ITEM",
+      "category": "possible_duplicate",
+      "status": "needs_review",
+      "severity": "low",
+      "title": "Possible repeat line item on same service date",
+      "explanation": "Code 36415 (Venipuncture / Diagnostic Lab Draw) appears twice on 2026-10-01 for $200.00 each on the provider bill, whereas it appears once on the EOB.",
+      "alternative_explanations": [
+        "Two separate blood draws may have been performed during the same visit.",
+        "Separate facility and laboratory processing charges may be listed under similar descriptions."
+      ],
+      "next_step": "Ask the billing office to confirm whether two distinct venipuncture procedures were performed on 2026-10-01 or if line item 3 is a duplicate entry.",
+      "difference_cents": 20000,
+      "evidence": [
+        {
+          "document_id": "doc_bill",
+          "page": 1,
+          "line_item_id": "li_bill_2",
+          "field": "line_items[1].line_total_cents",
+          "amount_cents": 20000,
+          "source_text": "10/01/2026 | 36415 Venipuncture Lab Draw | Qty 1 | $200.00",
+          "verification_note": "First instance on sample-bill.pdf, page 1"
+        },
+        {
+          "document_id": "doc_bill",
+          "page": 1,
+          "line_item_id": "li_bill_3",
+          "field": "line_items[2].line_total_cents",
+          "amount_cents": 20000,
+          "source_text": "10/01/2026 | 36415 Venipuncture Lab Draw | Qty 1 | $200.00",
+          "verification_note": "Second instance on sample-bill.pdf, page 1"
+        }
+      ],
+      "missing_information": []
+    }
+  ],
+  "limitations": [
+    "Synthetic demonstration case (Jordan Rivera / Sample Valley Clinic). Differences between documents warrant questions and do not establish billing fraud or legal dispute eligibility."
+  ],
+  "safety_disclaimer": "Educational prototype; review the original documents and consult the provider or insurer. Not legal, medical, or insurance advice."
+}

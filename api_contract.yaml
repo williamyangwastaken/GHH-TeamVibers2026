@@ -1,0 +1,470 @@
+```yaml
+openapi: 3.0.3
+info:
+  title: ClearBill AI API
+  version: 1.0.0
+  description: >
+    Frozen OpenAPI 3.0 specification for ClearBill AI (Girls Hoo Hack 2026).
+    Provides multimodal medical bill/EOB extraction, deterministic discrepancy auditing,
+    and evidence-grounded clarification letter drafting on synthetic data.
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local FastAPI development server
+
+paths:
+  /health:
+    get:
+      summary: Service health check
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                demo_mode: true
+
+  /demo:
+    get:
+      summary: Load precomputed synthetic sample analysis
+      operationId: getDemoAnalysis
+      description: Returns the frozen synthetic case (Jordan Rivera / Sample Valley Clinic) without calling Gemini.
+      responses:
+        "200":
+          description: Precomputed synthetic AnalysisResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisResponse"
+
+  /analyze:
+    post:
+      summary: Upload synthetic bill and optional EOB/GFE for Gemini extraction and deterministic audit
+      operationId: analyzeDocuments
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - bill
+              properties:
+                bill:
+                  type: string
+                  format: binary
+                  description: Required provider medical bill (PDF, PNG, JPG, max 10MB, max 6 pages).
+                eob:
+                  type: string
+                  format: binary
+                  description: Optional insurance Explanation of Benefits (PDF, PNG, JPG).
+                estimate:
+                  type: string
+                  format: binary
+                  description: Optional pre-treatment Good Faith Estimate (PDF, PNG, JPG).
+      responses:
+        "200":
+          description: Completed document extraction and deterministic reconciliation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "413":
+          $ref: "#/components/responses/FileTooLargeError"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaTypeError"
+        "422":
+          $ref: "#/components/responses/UnprocessableError"
+        "429":
+          $ref: "#/components/responses/RateLimitError"
+        "502":
+          $ref: "#/components/responses/UpstreamModelError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableError"
+
+  /letters:
+    post:
+      summary: Generate an editable clarification or dispute-question letter from verified findings
+      operationId: generateLetter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LetterRequest"
+            example:
+              case_id: demo-mismatch
+              finding_ids:
+                - f-eob-1
+              intent: clarification
+      responses:
+        "200":
+          description: Grounded editable letter draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterResponse"
+              example:
+                subject: "Clarification Request: Account Statement vs. EOB (Claim DEMO-C100)"
+                body: "Dear [Provider Billing Department],\n\nI am writing to request clarification regarding my statement from Sample Valley Clinic for service date 2026-10-01 (Claim DEMO-C100).\n\nMy provider statement dated 2026-10-08 shows a current balance due of $640.00 (page 1), whereas my finalized Explanation of Benefits from Fictional Mutual Health dated 2026-10-07 lists a patient responsibility of $390.00 (page 1)—a difference of $250.00.\n\nCould you please provide an updated itemized statement showing whether all insurance payments and contractual adjustments have been applied?\n\nSincerely,\n[Your Name]\n[Account/Claim Number]"
+                safety_note: "Review and verify all details against your original documents before sending. This draft has not been sent automatically."
+                is_fallback: false
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "404":
+          $ref: "#/components/responses/CaseNotFoundError"
+        "429":
+          $ref: "#/components/responses/RateLimitError"
+
+components:
+  schemas:
+    DocumentKind:
+      type: string
+      enum: [bill, eob, estimate]
+
+    ExtractionQuality:
+      type: string
+      enum: [complete, partial, failed]
+
+    FindingStatus:
+      type: string
+      enum: [verified_inconsistency, needs_review, insufficient_information]
+
+    FindingSeverity:
+      type: string
+      enum: [info, low, medium]
+
+    FindingCategory:
+      type: string
+      enum:
+        - arithmetic
+        - insurance_comparison
+        - possible_duplicate
+        - estimate_comparison
+        - missing_context
+
+    LetterIntent:
+      type: string
+      enum: [clarification, dispute]
+
+    ErrorCode:
+      type: string
+      enum:
+        - INVALID_UPLOAD
+        - DOCUMENT_UNREADABLE
+        - FILE_TOO_LARGE
+        - EXTRACTION_FAILED
+        - GEMINI_UNAVAILABLE
+        - CASE_NOT_FOUND
+        - BAD_SELECTION
+        - INTERNAL_ERROR
+
+    HealthResponse:
+      type: object
+      required: [status, demo_mode]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        demo_mode:
+          type: boolean
+
+    LineItem:
+      type: object
+      required: [id, description]
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        code:
+          type: string
+          nullable: true
+        service_date:
+          type: string
+          nullable: true
+          description: YYYY-MM-DD or null
+        quantity:
+          type: integer
+          nullable: true
+        unit_amount_cents:
+          type: integer
+          nullable: true
+        line_total_cents:
+          type: integer
+          nullable: true
+        page:
+          type: integer
+          minimum: 1
+          nullable: true
+        source_text:
+          type: string
+          nullable: true
+
+    DocumentSummary:
+      type: object
+      required:
+        - id
+        - kind
+        - filename
+        - pages
+        - extraction_quality
+        - line_items
+        - extraction_warnings
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: "#/components/schemas/DocumentKind"
+        filename:
+          type: string
+        pages:
+          type: integer
+          minimum: 1
+        extraction_quality:
+          $ref: "#/components/schemas/ExtractionQuality"
+        provider_name:
+          type: string
+          nullable: true
+        insurer_name:
+          type: string
+          nullable: true
+        document_date:
+          type: string
+          nullable: true
+        service_date:
+          type: string
+          nullable: true
+        claim_number:
+          type: string
+          nullable: true
+        total_charges_cents:
+          type: integer
+          nullable: true
+        amount_due_cents:
+          type: integer
+          nullable: true
+        patient_responsibility_cents:
+          type: integer
+          nullable: true
+        insurance_paid_cents:
+          type: integer
+          nullable: true
+        adjustments_cents:
+          type: integer
+          nullable: true
+        expected_total_cents:
+          type: integer
+          nullable: true
+        eob_status:
+          type: string
+          nullable: true
+        line_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineItem"
+        extraction_warnings:
+          type: array
+          items:
+            type: string
+
+    EvidenceRef:
+      type: object
+      required: [document_id, field]
+      properties:
+        document_id:
+          type: string
+        page:
+          type: integer
+          minimum: 1
+          nullable: true
+        line_item_id:
+          type: string
+          nullable: true
+        field:
+          type: string
+        amount_cents:
+          type: integer
+          nullable: true
+        source_text:
+          type: string
+          nullable: true
+        verification_note:
+          type: string
+          nullable: true
+
+    Finding:
+      type: object
+      required:
+        - id
+        - rule_id
+        - category
+        - status
+        - severity
+        - title
+        - explanation
+        - alternative_explanations
+        - next_step
+        - evidence
+        - missing_information
+      properties:
+        id:
+          type: string
+        rule_id:
+          type: string
+        category:
+          $ref: "#/components/schemas/FindingCategory"
+        status:
+          $ref: "#/components/schemas/FindingStatus"
+        severity:
+          $ref: "#/components/schemas/FindingSeverity"
+        title:
+          type: string
+        explanation:
+          type: string
+        alternative_explanations:
+          type: array
+          items:
+            type: string
+        next_step:
+          type: string
+        difference_cents:
+          type: integer
+          nullable: true
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvidenceRef"
+        missing_information:
+          type: array
+          items:
+            type: string
+
+    AnalysisResponse:
+      type: object
+      required:
+        - case_id
+        - is_demo
+        - documents
+        - findings
+        - limitations
+        - safety_disclaimer
+      properties:
+        case_id:
+          type: string
+        is_demo:
+          type: boolean
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSummary"
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Finding"
+        limitations:
+          type: array
+          items:
+            type: string
+        safety_disclaimer:
+          type: string
+
+    LetterRequest:
+      type: object
+      required: [case_id, finding_ids, intent]
+      properties:
+        case_id:
+          type: string
+        finding_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        intent:
+          $ref: "#/components/schemas/LetterIntent"
+
+    LetterResponse:
+      type: object
+      required: [subject, body, safety_note, is_fallback]
+      properties:
+        subject:
+          type: string
+        body:
+          type: string
+        safety_note:
+          type: string
+        is_fallback:
+          type: boolean
+
+    ErrorDetail:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+        retryable:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+
+  responses:
+    BadRequestError:
+      description: Invalid upload or bad selection
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    FileTooLargeError:
+      description: Uploaded file exceeds 10MB or 6 pages
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UnsupportedMediaTypeError:
+      description: File is not PDF, PNG, or JPG
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UnprocessableError:
+      description: Corrupt or encrypted document
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    CaseNotFoundError:
+      description: Requested case_id expired or does not exist
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimitError:
+      description: Gemini API rate limit reached
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamModelError:
+      description: Model returned invalid output
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ServiceUnavailableError:
+      description: Upstream Gemini API unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
