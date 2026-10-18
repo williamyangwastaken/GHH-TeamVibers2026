@@ -3,9 +3,7 @@ import {
   Check,
   ClipboardList,
   FileText,
-  PenLine,
   ReceiptText,
-  Search,
   ShieldCheck,
   TriangleAlert,
   Upload,
@@ -64,7 +62,7 @@ function jumpTo(event: MouseEvent<HTMLAnchorElement>) {
   if (id) document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-/** "How it works": four mock screens built from the Sarah sample case, then principles and the CTA band. */
+/** "How it works": four mock screens built from the Sarah sample case, then the family section and the CTA band. */
 export function HowItWorks({ refs, onOpenUpload, onOpenSample, onTrySample, isLoadingSample }: HowItWorksProps) {
   const [cbc, xray] = SARAH_ROWS.slice(3);
   const miniTile = { width: 28, height: 28, borderRadius: 8 };
@@ -319,7 +317,7 @@ export function HowItWorks({ refs, onOpenUpload, onOpenSample, onTrySample, isLo
         <div className="step-row flip reveal" id="step-4">
           <div className="step-copy">
             <div className="step-num">04</div>
-            <h3>Ask with confidence</h3>
+            <h3>Get an instant clarification/dispute letter</h3>
             <p>
               Pick the findings you care about and get a polite, specific letter that uses only the facts we found. Edit it,
               copy it, and send it yourself.
@@ -373,37 +371,15 @@ export function HowItWorks({ refs, onOpenUpload, onOpenSample, onTrySample, isLo
           </div>
         </div>
 
-        <div className="principles reveal">
-          <div className="principle">
-            <span className="icon-tile">
-              <Search size={19} aria-hidden="true" />
-            </span>
-            <h4>Evidence, not guesses</h4>
-            <p>Every flag points to the exact figures and pages behind it.</p>
-          </div>
-          <div className="principle">
-            <span className="icon-tile amber">
-              <TriangleAlert size={19} aria-hidden="true" />
-            </span>
-            <h4>Honest labels</h4>
-            <p>A difference is something to ask about, not proof of an error. We say so plainly.</p>
-          </div>
-          <div className="principle">
-            <span className="icon-tile teal">
-              <PenLine size={19} aria-hidden="true" />
-            </span>
-            <h4>You stay in control</h4>
-            <p>Nothing is sent for you. You review, edit, and decide what happens next.</p>
-          </div>
-        </div>
-
         <div className="family reveal">
           <div className="ph">
             <Image
               src="/demo/family.jpg"
               alt="A couple smiling at a phone on their living room couch, with paperwork and mugs on the coffee table"
               fill
-              sizes="(max-width: 860px) 100vw, 620px"
+              // The photo is cropped to fill a 4:3 frame, which zooms it, so ask for more width than the frame.
+              quality={90}
+              sizes="(max-width: 860px) 100vw, 900px"
             />
             <div className="tag-card">
               <span className="icon-tile">

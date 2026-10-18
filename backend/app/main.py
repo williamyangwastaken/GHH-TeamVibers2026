@@ -1,4 +1,4 @@
-"""ClearBill AI FastAPI application.
+"""Sana FastAPI application.
 
 Run locally (from backend/, single worker; the case store is in-memory):
 
@@ -41,10 +41,11 @@ def allowed_origins() -> list[str]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="ClearBill AI API", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="Sana API", version="1.0.0", lifespan=lifespan)
+    origins = allowed_origins()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allowed_origins(),
+        allow_origins=origins,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
         allow_credentials=False,
@@ -75,14 +76,21 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(Exception)
-    async def _unexpected_error(_: Request, exc: Exception):
+    async def _unexpected_error(request: Request, exc: Exception):
         logger.error("Unhandled server error (%s)", type(exc).__name__, exc_info=exc)
-        return error_response(
+        response = error_response(
             ErrorCode.INTERNAL_ERROR,
             "Something went wrong on our side. Please try again, or use the sample case.",
             500,
             retryable=True,
         )
+        # Starlette runs this handler outside CORSMiddleware. Without these headers
+        # the browser hides the 500 and the frontend can only report NETWORK.
+        origin = request.headers.get("origin")
+        if origin in origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+        return response
 
     return app
 

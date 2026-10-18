@@ -35,7 +35,7 @@ def national_average_charge(code: str) -> tuple[int, str] | None:
         "size": "100",
         "offset": "0",
     }
-    request = Request(CMS_DATA_URL.format(dataset_id) + "?" + urlencode(params), headers={"User-Agent": "ClearBill/1.0"})
+    request = Request(CMS_DATA_URL.format(dataset_id) + "?" + urlencode(params), headers={"User-Agent": "Sana/1.0"})
     try:
         with urlopen(request, timeout=3) as response:
             payload = __import__("json").loads(response.read(2_000_000))

@@ -1,5 +1,5 @@
 /**
- * Offline demo support, ported from the prototype (public/demo/prototype/clearbill.html):
+ * Offline demo support, ported from the original single-file prototype:
  *  - two extra synthetic sample cases that exist only in the frontend, and
  *  - a deterministic template letter used when the backend cannot draft one.
  * The headline "demo-mismatch" case comes from GET /api/v1/demo (see lib/api.ts).

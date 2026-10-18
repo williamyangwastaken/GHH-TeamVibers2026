@@ -84,24 +84,22 @@ async def analyze(
         with _labelled(kind):
             return await extraction.extract_document(content, content_type, filename, kind)
 
-    # Serialize provider calls. Concurrent bill + EOB vision/extraction requests
-    # can burst through Groq's per-minute token/request limits on small plans.
+    # Run all extractions concurrently. Groq calls round-robin across the key pool
+    # and fail over on 429/5xx without sleeping, so bursts are absorbed by the pool.
     extracted_by_kind: dict[DocumentKind, DocumentSummary] = {}
     optional_failures: list[str] = []
-    # When both optional documents are present, prioritize the GFE comparison
-    # before the EOB. An EOB rate-limit failure must not prevent this requested check.
-    extraction_order = {DocumentKind.bill: 0, DocumentKind.estimate: 1, DocumentKind.eob: 2}
-    for upload in sorted(uploads, key=lambda item: extraction_order[item[0]]):
-        try:
-            doc = await extract(*upload)
-            extracted_by_kind[doc.kind] = doc
-        except ExtractionError as exc:
-            kind = upload[0]
+    outcomes = await asyncio.gather(*(extract(*u) for u in uploads), return_exceptions=True)
+    for (kind, *_), outcome in zip(uploads, outcomes):  # upload order: bill first
+        if isinstance(outcome, ExtractionError):
             if kind == DocumentKind.bill:
-                raise
+                raise outcome
             # An optional EOB/GFE failure must not discard usable bill/GFE
             # results. The audit will report which comparison is unavailable.
-            optional_failures.append(exc.message)
+            optional_failures.append(outcome.message)
+        elif isinstance(outcome, BaseException):
+            raise outcome
+        else:
+            extracted_by_kind[outcome.kind] = outcome
 
     # Keep API document ordering aligned with the user's bill, EOB, estimate fields.
     documents = [extracted_by_kind[kind] for kind, _, _, _ in uploads if kind in extracted_by_kind]

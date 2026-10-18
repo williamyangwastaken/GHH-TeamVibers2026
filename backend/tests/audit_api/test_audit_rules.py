@@ -389,7 +389,7 @@ def test_gfe_difference_at_or_above_400_dollars_is_flagged(difference):
     (finding,) = [f for f in result.findings if f.rule_id == R6_GFE_PATIENT_AMOUNT_THRESHOLD]
     assert finding.status == FindingStatus.needs_review
     assert finding.difference_cents == difference
-    assert "ClearBill's $400 patient-balance review trigger" in finding.explanation
+    assert "Sana's $400 patient-balance review trigger" in finding.explanation
     assert "does not determine eligibility" in finding.explanation
     assert [ref.document_id for ref in finding.evidence] == [bill.id, estimate.id]
     assert_sound(result, bill, estimate)
@@ -401,7 +401,7 @@ def test_gfe_difference_just_below_400_dollars_is_not_threshold_alert():
     )
     (finding,) = [f for f in result.findings if f.rule_id == R6_GFE_PATIENT_AMOUNT_THRESHOLD]
     assert finding.severity == FindingSeverity.info
-    assert "below ClearBill's $400 patient-balance review trigger" in finding.explanation
+    assert "below Sana's $400 patient-balance review trigger" in finding.explanation
 
 
 def test_gfe_documents_with_different_providers_are_not_compared():
