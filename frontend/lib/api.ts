@@ -13,12 +13,12 @@ import type {
   LetterResponse,
 } from "./types";
 
-export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "");
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001").replace(/\/+$/, "");
 const API_PREFIX = "/api/v1";
 
 const DEMO_TIMEOUT_MS = 4_000;
 const HEALTH_TIMEOUT_MS = 2_500;
-// The backend gives Gemini 30s to draft a letter before using its own template.
+// The backend uses Groq for a draft and falls back to its own template.
 const LETTER_TIMEOUT_MS = 45_000;
 
 /** Contract error codes, plus client-side failures that never reached the backend. */

@@ -13,6 +13,16 @@ export type { FindingsDashboardProps } from "@/lib/types";
 
 const OPTIONAL_KINDS: DocumentKind[] = ["eob", "estimate"];
 
+function missingDocumentLabel(kind: DocumentKind, limitations: string[]): string {
+  const label = KIND_LABEL[kind];
+  const backendLabel = kind === "eob" ? "EOB" : label;
+  // The API records extraction failures for optional files in limitations, but
+  // leaves them out of documents. Don't misreport an uploaded file as absent.
+  return limitations.some((item) => item.startsWith(`${backendLabel}:`))
+    ? "Uploaded, but analysis failed"
+    : "Not provided";
+}
+
 export function FindingsDashboard({
   analysis,
   selectedFindingIds,
@@ -104,7 +114,7 @@ export function FindingsDashboard({
                 <KindTile kind={kind} tone="gray" />
                 <div className="meta">
                   <div className="name text-ink-3">{KIND_LABEL[kind]}</div>
-                  <div className="fn">Not provided</div>
+                  <div className="fn">{missingDocumentLabel(kind, analysis.limitations)}</div>
                 </div>
                 <span className="check-circle hollow" />
               </div>

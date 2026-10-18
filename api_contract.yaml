@@ -30,7 +30,7 @@ paths:
     get:
       summary: Load precomputed synthetic sample analysis
       operationId: getDemoAnalysis
-      description: Returns the frozen synthetic case (Jordan Rivera / Sample Valley Clinic) without calling Gemini.
+      description: Returns the frozen synthetic case (Jordan Rivera / Sample Valley Clinic) without calling the model provider.
       responses:
         "200":
           description: Precomputed synthetic AnalysisResponse
@@ -41,7 +41,7 @@ paths:
 
   /analyze:
     post:
-      summary: Upload synthetic bill and optional EOB/GFE for Gemini extraction and deterministic audit
+      summary: Upload bill and optional EOB/GFE for Groq extraction and deterministic audit
       operationId: analyzeDocuments
       requestBody:
         required: true
@@ -145,6 +145,7 @@ components:
         - insurance_comparison
         - possible_duplicate
         - estimate_comparison
+        - price_benchmark
         - missing_context
 
     LetterIntent:
@@ -158,6 +159,8 @@ components:
         - DOCUMENT_UNREADABLE
         - FILE_TOO_LARGE
         - EXTRACTION_FAILED
+        - MODEL_UNAVAILABLE
+        - MODEL_AUTH_FAILED
         - GEMINI_UNAVAILABLE
         - CASE_NOT_FOUND
         - BAD_SELECTION
@@ -450,7 +453,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     RateLimitError:
-      description: Gemini API rate limit reached
+      description: Model provider rate limit reached
       content:
         application/json:
           schema:
@@ -462,7 +465,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     ServiceUnavailableError:
-      description: Upstream Gemini API unavailable
+      description: Upstream model provider unavailable
       content:
         application/json:
           schema:

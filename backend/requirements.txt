@@ -2,8 +2,10 @@ fastapi
 uvicorn[standard]
 pydantic>=2.9.0
 python-multipart
+# Retained for the legacy Gemini adapter tests; app requests use Groq.
 google-genai>=1.0.0
 pypdf
+pymupdf>=1.24.0
 pytest
-# Required by FastAPI's TestClient (also pulled in by google-genai).
+# Required by FastAPI's TestClient.
 httpx

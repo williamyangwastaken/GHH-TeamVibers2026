@@ -1,16 +1,16 @@
-"""Document extraction: upload validation -> Gemini structured output -> DocumentSummary.
+"""Document extraction: upload validation -> Groq structured output -> DocumentSummary.
 
 Public API (frozen in CONTRACT.md):
 
     await extract_document(content, content_type, filename, kind) -> DocumentSummary
 
-Also exported so routes can reject every bad upload before spending a Gemini
-call on any of them:
+Also exported so routes can reject every bad upload before making any model
+calls:
 
     validate_upload(content, content_type) -> ValidatedUpload
 
 Every failure raises ``ExtractionError`` (code, user-safe message, HTTP status,
-retryable). Gemini only transcribes printed text; dollars -> cents, date
+retryable). Groq only transcribes printed text; dollars -> cents, date
 normalization, and quality grading happen deterministically here.
 
 Upload limits come from MAX_FILE_SIZE_MB (default 10, MiB) and MAX_PDF_PAGES
@@ -40,7 +40,7 @@ from app.schemas import (
     ExtractionQuality,
     LineItem,
 )
-from app.services import gemini_api, prompts
+from app.services import groq_api, prompts
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ async def extract_document(
     kind: DocumentKind,
 ) -> DocumentSummary:
     """
-    Validates file signature/size/pages, calls Gemini multimodal structured output,
+    Validates file signature/size/pages, calls Groq structured output,
     normalizes currency to integer cents and dates to YYYY-MM-DD (or None),
     and returns a validated DocumentSummary. Raises ExtractionError (with ErrorCode) on failure.
 
@@ -113,11 +113,12 @@ async def extract_document(
     upload = validate_upload(content, content_type)
     try:
         kind = DocumentKind(kind)
-        extracted = await gemini_api.generate_extraction(
+        extracted = await groq_api.generate_extraction(
             content=content,
             mime_type=upload.mime_type,
             system_instruction=prompts.EXTRACTION_SYSTEM_INSTRUCTION,
             prompt=prompts.build_extraction_prompt(kind, upload.pages),
+            kind=kind,
         )
         return normalize_extraction(extracted, kind=kind, filename=filename, pages=upload.pages)
     except ExtractionError:
@@ -358,7 +359,7 @@ def normalize_extraction(
     filename: str,
     pages: int,
 ) -> DocumentSummary:
-    """Turn Gemini's as-printed transcription into a validated DocumentSummary.
+    """Turn Groq's as-printed transcription into a validated DocumentSummary.
 
     Grading: ``failed`` if no amounts or line items were found; ``partial`` if
     anything needed a warning from us (unreadable values, missing headline

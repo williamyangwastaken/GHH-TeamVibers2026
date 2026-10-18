@@ -14,7 +14,7 @@ Conventions shared by every model:
     Line-item amounts keep their printed sign (credits are negative).
 
 The ``Extracted*`` models at the bottom are internal: they are the structured
-output schema sent to Gemini and are never returned to the browser.
+output schema sent to the model and are never returned to the browser.
 """
 
 from __future__ import annotations
@@ -59,6 +59,7 @@ class FindingCategory(StrEnum):
     insurance_comparison = "insurance_comparison"
     possible_duplicate = "possible_duplicate"
     estimate_comparison = "estimate_comparison"
+    price_benchmark = "price_benchmark"
     missing_context = "missing_context"
 
 
@@ -72,6 +73,9 @@ class ErrorCode(StrEnum):
     DOCUMENT_UNREADABLE = "DOCUMENT_UNREADABLE"
     FILE_TOO_LARGE = "FILE_TOO_LARGE"
     EXTRACTION_FAILED = "EXTRACTION_FAILED"
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+    MODEL_AUTH_FAILED = "MODEL_AUTH_FAILED"
+    # Legacy Gemini adapter error; live extraction uses MODEL_UNAVAILABLE.
     GEMINI_UNAVAILABLE = "GEMINI_UNAVAILABLE"
     CASE_NOT_FOUND = "CASE_NOT_FOUND"
     BAD_SELECTION = "BAD_SELECTION"
@@ -242,10 +246,9 @@ class ExtractionError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Internal Gemini structured-output models
+# Internal model structured-output models
 # ---------------------------------------------------------------------------
-# These are passed as ``response_schema`` to Gemini. Rules that keep them
-# compatible with the Gemini Developer API and with honest extraction:
+# These define the model output shape and support honest extraction:
 #   * no ``extra="forbid"`` (the API rejects ``additionalProperties``);
 #   * every field is required but nullable, so the model must emit each key and
 #     use null for anything not printed, rather than omitting or guessing;
@@ -296,7 +299,13 @@ class ExtractedDocument(BaseModel):
     service_date: str | None = Field(
         description="Date of service exactly as printed. Copy the full text if it is a range."
     )
-    claim_number: str | None = Field(description="Claim number exactly as printed, or null.")
+    claim_number: str | None = Field(
+        description=(
+            "Insurer/provider claim identifier exactly as printed. Do not use a patient member ID, "
+            "group number, provider account number, authorization number, or generic reference number. "
+            "If the document has several ambiguous identifiers, return null."
+        )
+    )
     total_charges: str | None = Field(description="Total billed charges exactly as printed.")
     amount_due: str | None = Field(
         description="Current balance / amount due now from the patient, exactly as printed."

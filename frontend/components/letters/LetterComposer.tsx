@@ -213,7 +213,7 @@ export function LetterComposer({
                   Template draft
                 </span>
               ) : (
-                <span className="tag req">Gemini draft · grounded</span>
+                <span className="tag req">AI draft · grounded</span>
               )}
             </div>
             <div className="notice mx-5 my-4">

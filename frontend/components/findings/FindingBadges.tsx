@@ -26,6 +26,7 @@ const CATEGORY_TILE: Record<FindingCategory, { icon: LucideIcon; tone: Tone }> =
   possible_duplicate: { icon: Copy, tone: "clay" },
   arithmetic: { icon: Calculator, tone: "teal" },
   estimate_comparison: { icon: ClipboardList, tone: "teal" },
+  price_benchmark: { icon: Calculator, tone: "amber" },
   missing_context: { icon: CircleHelp, tone: "gray" },
 };
 

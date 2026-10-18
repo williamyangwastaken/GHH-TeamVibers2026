@@ -7,6 +7,8 @@ const TITLE: Partial<Record<ClientErrorCode, string>> = {
   FILE_TOO_LARGE: "File too large",
   INVALID_UPLOAD: "We couldn't accept that upload",
   DOCUMENT_UNREADABLE: "We couldn't read that file",
+  MODEL_UNAVAILABLE: "Couldn't connect to document analysis",
+  MODEL_AUTH_FAILED: "Groq rejected the API key",
   GEMINI_UNAVAILABLE: "Document reading is temporarily unavailable",
   EXTRACTION_FAILED: "We couldn't extract the bill details",
 };
