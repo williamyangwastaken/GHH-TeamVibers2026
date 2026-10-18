@@ -174,7 +174,7 @@ export function HowItWorks({ refs, onOpenUpload, onOpenSample, onTrySample, isLo
             <div className="step-num">02</div>
             <h3>We compare every number</h3>
             <p>
-              Gemini reads each line of your documents. Then a transparent rules engine checks the math, looks for repeated
+              AI reads each line of your documents. Then a transparent rules engine checks the math, looks for repeated
               or mismatched codes, and lines up your bill against your EOB.
             </p>
             <ul>

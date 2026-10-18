@@ -1,10 +1,10 @@
-"""POST /analyze end to end, with Gemini mocked at the extraction boundary."""
+"""POST /analyze end to end, with Groq mocked at the extraction boundary."""
 
 import pytest
 
 from app.schemas import ErrorCode, ExtractedDocument, ExtractionError
-from app.services import extraction, gemini_api
-from audit_cases import blank_pdf, demo_documents
+from app.services import extraction, groq_api
+from audit_cases import blank_pdf, demo_documents, estimate_doc
 
 PDF = "application/pdf"
 
@@ -55,6 +55,53 @@ def test_bill_and_eob_produce_findings_and_a_stored_case(client, fake_extract):
     assert "$640.00" in letter.json()["body"]
 
 
+def test_bill_and_eob_extractions_are_serialized(client, monkeypatch):
+    import asyncio
+
+    bill, eob = demo_documents()
+    active = 0
+    max_active = 0
+
+    async def fake(content, content_type, filename, kind):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return {"bill": bill, "eob": eob}[str(kind)].model_copy(update={"filename": filename})
+
+    monkeypatch.setattr(extraction, "extract_document", fake)
+    monkeypatch.setattr("app.services.price_benchmark.national_average_charge", lambda code: None)
+    response = client.post("/api/v1/analyze", files=files(bill=(blank_pdf(), PDF), eob=(blank_pdf(), PDF)))
+    assert response.status_code == 200, response.text
+    assert max_active == 1
+    assert any(f["rule_id"] == "R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH" for f in response.json()["findings"])
+
+
+def test_eob_rate_limit_does_not_discard_bill_and_gfe_analysis(client, monkeypatch):
+    bill, _ = demo_documents()
+    bill = bill.model_copy(update={"amount_due_cents": 90000})
+    estimate = estimate_doc(expected_total_cents=50000)
+
+    async def fake(content, content_type, filename, kind):
+        if str(kind) == "eob":
+            raise ExtractionError(ErrorCode.MODEL_UNAVAILABLE, "EOB: Groq rate limit", http_status=429, retryable=True)
+        doc = bill if str(kind) == "bill" else estimate
+        return doc.model_copy(update={"filename": filename})
+
+    monkeypatch.setattr(extraction, "extract_document", fake)
+    monkeypatch.setattr("app.services.price_benchmark.national_average_charge", lambda code: None)
+    response = client.post(
+        "/api/v1/analyze",
+        files=files(bill=(blank_pdf(), PDF), eob=(blank_pdf(), PDF), estimate=(blank_pdf(), PDF)),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert {doc["kind"] for doc in data["documents"]} == {"bill", "estimate"}
+    assert any(f["rule_id"] == "R6_GFE_PATIENT_AMOUNT_THRESHOLD" for f in data["findings"])
+    assert any("EOB: Groq rate limit" in limitation for limitation in data["limitations"])
+
+
 def test_bill_only_reports_missing_insurance_comparison(client, fake_extract):
     data = client.post("/api/v1/analyze", files=files(bill=(blank_pdf(), PDF))).json()
     assert [f["rule_id"] for f in data["findings"]] == [
@@ -99,9 +146,9 @@ def test_too_many_pages_is_413(client, fake_extract):
     assert_error(client.post("/api/v1/analyze", files=files(bill=(blank_pdf(7), PDF))), 413, "FILE_TOO_LARGE")
 
 
-def test_without_gemini_upload_fails_honestly(client):
+def test_without_groq_upload_fails_honestly(client):
     # Real extraction path, no key: an honest 503, never a fabricated analysis.
-    error = assert_error(client.post("/api/v1/analyze", files=files(bill=(blank_pdf(), PDF))), 503, "GEMINI_UNAVAILABLE")
+    error = assert_error(client.post("/api/v1/analyze", files=files(bill=(blank_pdf(), PDF))), 503, "MODEL_UNAVAILABLE")
     assert "sample case" in error["message"]
 
 
@@ -131,7 +178,7 @@ def test_unexpected_errors_are_500_without_internals(monkeypatch):
 
 
 def test_full_pipeline_with_model_output_mocked(client, monkeypatch):
-    """Real validation + normalization + audit; only the Gemini call is faked."""
+    """Real validation + normalization + audit; only the Groq call is faked."""
     printed = {
         "detected_document_type": "bill", "is_fully_legible": True,
         "provider_name": "Sample Valley Clinic", "insurer_name": None,
@@ -148,7 +195,7 @@ def test_full_pipeline_with_model_output_mocked(client, monkeypatch):
     async def fake_generate_extraction(**kwargs):
         return ExtractedDocument.model_validate(printed)
 
-    monkeypatch.setattr(gemini_api, "generate_extraction", fake_generate_extraction)
+    monkeypatch.setattr(groq_api, "generate_extraction", fake_generate_extraction)
     data = client.post("/api/v1/analyze", files=files(bill=(blank_pdf(), PDF))).json()
     (math,) = [f for f in data["findings"] if f["rule_id"] == "R1_BILL_TOTAL_ARITHMETIC"]
     assert (math["status"], math["difference_cents"]) == ("verified_inconsistency", 5000)

@@ -21,6 +21,7 @@ export type FindingCategory =
   | "insurance_comparison"
   | "possible_duplicate"
   | "estimate_comparison"
+  | "price_benchmark"
   | "missing_context";
 
 export type LetterIntent = "clarification" | "dispute";
@@ -30,6 +31,8 @@ export type ErrorCode =
   | "DOCUMENT_UNREADABLE"
   | "FILE_TOO_LARGE"
   | "EXTRACTION_FAILED"
+  | "MODEL_UNAVAILABLE"
+  | "MODEL_AUTH_FAILED"
   | "GEMINI_UNAVAILABLE"
   | "CASE_NOT_FOUND"
   | "BAD_SELECTION"
@@ -228,6 +231,7 @@ export const CATEGORY_LABEL: Record<FindingCategory, string> = {
   insurance_comparison: "Insurance comparison",
   possible_duplicate: "Possible repeat charge",
   estimate_comparison: "Estimate comparison",
+  price_benchmark: "Price reference",
   missing_context: "Missing context",
 };
 

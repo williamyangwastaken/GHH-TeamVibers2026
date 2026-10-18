@@ -10,6 +10,7 @@ from app.services.audit import (
     R1_BILL_TOTAL_ARITHMETIC,
     R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH,
     R3_POSSIBLE_DUPLICATE_LINE_ITEM,
+    R6_GFE_PATIENT_AMOUNT_THRESHOLD,
     R5_MISSING_INFORMATION,
     evidence_problems,
     format_usd,
@@ -74,7 +75,7 @@ def test_bill_only_states_insurance_comparison_unavailable():
     assert rules(result) == [(R5_MISSING_INFORMATION, FindingStatus.insufficient_information)]
     assert result.findings[0].title == "Insurance comparison not available"
     assert result.findings[0].evidence == []
-    assert any("No EOB was provided" in lim for lim in result.limitations)
+    assert any("No readable EOB was available" in lim for lim in result.limitations)
     assert_sound(result, bill)
 
 
@@ -188,6 +189,29 @@ def test_math_error_is_a_verified_document_inconsistency():
     assert_sound(result, bill, eob)
 
 
+def test_unit_price_times_quantity_mismatch_is_flagged():
+    bill = clean_bill(total_charges_cents=3000, line_items=[line("li_x", "Lab panel", 3000, code="80053", qty=2, unit=2000)])
+    findings = run_audit(bill).findings
+    (math,) = [f for f in findings if f.rule_id == R1_BILL_TOTAL_ARITHMETIC]
+    assert math.status == FindingStatus.verified_inconsistency
+    assert math.difference_cents == 1000
+    assert "2 × $20.00" in math.explanation
+    assert_sound(run_audit(bill), bill)
+
+
+def test_price_benchmark_flags_only_material_difference_and_keeps_source_context():
+    from app.services.audit import price_benchmark_findings
+
+    bill = clean_bill(line_items=[line("li_x", "Office visit", 52000, code="99214")])
+    (finding,) = price_benchmark_findings(bill, {"99214": (10000, "2024")})
+    assert finding.category.value == "price_benchmark"
+    assert finding.status == FindingStatus.needs_review
+    assert finding.difference_cents is None
+    assert "Original Medicare Part B" in finding.explanation
+    assert "not proof of an error" in finding.explanation
+    assert not price_benchmark_findings(bill, {"99214": (40000, "2024")})
+
+
 def test_math_error_on_partial_extraction_is_only_needs_review():
     bill = clean_bill(total_charges_cents=75000, extraction_quality="partial")
     (math,) = [f for f in run_audit(bill, clean_eob()).findings if f.rule_id == R1_BILL_TOTAL_ARITHMETIC]
@@ -214,13 +238,66 @@ def test_unclear_arithmetic_is_not_asserted(overrides, reason):
 # --- unmatched-eob / nonfinal-eob / R2 edges --------------------------------
 
 
-def test_unmatched_claim_is_insufficient_information_not_an_overcharge():
+def test_different_claim_ids_with_same_provider_and_date_still_compare_provisionally():
     bill, eob = clean_bill(amount_due_cents=64000), clean_eob(claim_number="OTHER-999")
     result = run_audit(bill, eob)
     (r2,) = [f for f in result.findings if f.rule_id == R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH]
-    assert (r2.status, r2.severity, r2.difference_cents) == (FindingStatus.insufficient_information, FindingSeverity.info, None)
-    assert "DEMO-C200" in r2.explanation and "OTHER-999" in r2.explanation
+    assert (r2.status, r2.difference_cents) == (FindingStatus.needs_review, 25000)
+    assert "identifiers differ" in r2.explanation
+    assert any("DEMO-C200" in item and "OTHER-999" in item for item in r2.missing_information)
     assert_sound(result, bill, eob)
+
+
+def test_conflicting_claim_ids_and_different_provider_compare_as_unverified_uploaded_pair():
+    bill = clean_bill(amount_due_cents=64000)
+    eob = clean_eob(claim_number="OTHER-999", provider_name="Another Hospital")
+    result = run_audit(bill, eob)
+    (r2,) = [f for f in result.findings if f.rule_id == R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH]
+    assert r2.status == FindingStatus.needs_review
+    assert r2.difference_cents == 25000
+    assert "claim match not verified" in r2.explanation
+
+
+def test_uploaded_pair_amounts_are_compared_when_extracted_match_fields_are_missing():
+    bill = clean_bill(claim_number=None, provider_name=None, service_date=None, amount_due_cents=64000)
+    eob = clean_eob(claim_number=None, provider_name=None, service_date=None, patient_responsibility_cents=39000)
+    (r2,) = [
+        finding for finding in run_audit(bill, eob).findings
+        if finding.rule_id == R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH
+    ]
+    assert r2.status == FindingStatus.needs_review
+    assert r2.difference_cents == 25000
+    assert "claim match not verified" in r2.explanation
+    assert any("confirm" in item.lower() for item in r2.missing_information)
+
+
+def test_equal_amounts_are_reported_when_claim_match_is_unverified():
+    bill = clean_bill(claim_number=None, provider_name=None, service_date=None, amount_due_cents=39000)
+    eob = clean_eob(claim_number=None, provider_name=None, service_date=None, patient_responsibility_cents=39000)
+    (r2,) = [
+        finding for finding in run_audit(bill, eob).findings
+        if finding.rule_id == R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH
+    ]
+    assert r2.status == FindingStatus.insufficient_information
+    assert r2.difference_cents == 0
+    assert "amounts match" in r2.title.lower()
+
+
+def test_missing_amount_reports_missing_balance_instead_of_hiding_it_as_claim_mismatch():
+    bill = clean_bill(
+        claim_number=None, provider_name=None, service_date=None, amount_due_cents=None
+    )
+    eob = clean_eob(
+        claim_number=None, provider_name=None, service_date=None, patient_responsibility_cents=39000
+    )
+    (r2,) = [
+        finding for finding in run_audit(bill, eob).findings
+        if finding.rule_id == R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH
+    ]
+    assert r2.title == "Bill and EOB amounts could not be compared"
+    assert "The current balance or amount due on the bill" in r2.missing_information
+    assert "Confirmation that the uploaded bill and EOB refer to the same claim or visit" in r2.missing_information
+    assert {ref.field for ref in r2.evidence} == {"patient_responsibility_cents", "claim_number"}
 
 
 def test_claim_numbers_match_despite_formatting():
@@ -237,11 +314,13 @@ def test_same_provider_and_date_match_without_claim_numbers():
     assert any("claim number" in m for m in r2.missing_information)
 
 
-def test_different_provider_without_claim_numbers_is_unmatched():
+def test_different_provider_without_claim_numbers_compares_uploaded_pair_with_caveat():
     bill = clean_bill(claim_number=None, amount_due_cents=64000)
     eob = clean_eob(claim_number=None, provider_name="Another Hospital")
     (r2,) = run_audit(bill, eob).findings
-    assert r2.status == FindingStatus.insufficient_information
+    assert r2.status == FindingStatus.needs_review
+    assert r2.difference_cents == 25000
+    assert "claim match not verified" in r2.explanation
 
 
 @pytest.mark.parametrize("status", ["Pending", "In Process", "under review"])
@@ -296,10 +375,42 @@ def test_partial_extraction_adds_a_limitation():
     assert any("could not be read reliably" in lim for lim in result.limitations)
 
 
-def test_estimate_is_acknowledged_but_not_compared():
+def test_estimate_below_bill_amount_does_not_trigger_gfe_finding():
     result = run_audit(clean_bill(), clean_eob(), estimate_doc())
     assert result.findings == []
-    assert any("Good Faith Estimate comparison is not supported" in lim for lim in result.limitations)
+    assert not any("comparison is not supported" in lim for lim in result.limitations)
+
+
+@pytest.mark.parametrize("difference", [40000, 50000])
+def test_gfe_difference_at_or_above_400_dollars_is_flagged(difference):
+    bill = clean_bill(amount_due_cents=50000 + difference)
+    estimate = estimate_doc(expected_total_cents=50000)
+    result = run_audit(bill, None, estimate)
+    (finding,) = [f for f in result.findings if f.rule_id == R6_GFE_PATIENT_AMOUNT_THRESHOLD]
+    assert finding.status == FindingStatus.needs_review
+    assert finding.difference_cents == difference
+    assert "ClearBill's $400 patient-balance review trigger" in finding.explanation
+    assert "does not determine eligibility" in finding.explanation
+    assert [ref.document_id for ref in finding.evidence] == [bill.id, estimate.id]
+    assert_sound(result, bill, estimate)
+
+
+def test_gfe_difference_just_below_400_dollars_is_not_threshold_alert():
+    result = run_audit(
+        clean_bill(amount_due_cents=89999), None, estimate_doc(expected_total_cents=50000)
+    )
+    (finding,) = [f for f in result.findings if f.rule_id == R6_GFE_PATIENT_AMOUNT_THRESHOLD]
+    assert finding.severity == FindingSeverity.info
+    assert "below ClearBill's $400 patient-balance review trigger" in finding.explanation
+
+
+def test_gfe_documents_with_different_providers_are_not_compared():
+    result = run_audit(
+        clean_bill(amount_due_cents=100000), None,
+        estimate_doc(expected_total_cents=50000, provider_name="Different Medical Center"),
+    )
+    (finding,) = [f for f in result.findings if f.rule_id == R6_GFE_PATIENT_AMOUNT_THRESHOLD]
+    assert finding.status == FindingStatus.insufficient_information
 
 
 def test_documents_must_be_passed_in_the_right_slots():

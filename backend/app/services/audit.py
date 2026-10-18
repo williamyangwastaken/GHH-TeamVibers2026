@@ -10,6 +10,7 @@ Rules:
     R1_BILL_TOTAL_ARITHMETIC               bill line items vs. printed total charges
     R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH bill amount due vs. matching EOB patient responsibility
     R3_POSSIBLE_DUPLICATE_LINE_ITEM        same-looking repeated bill lines
+    R6_GFE_PATIENT_AMOUNT_THRESHOLD       bill amount due vs. GFE ($400 review trigger)
     R5_MISSING_INFORMATION                 checks that could not run
 
 Principles: compare only like-for-like integer-cent values; when completeness or
@@ -38,6 +39,7 @@ from app.schemas import (
 R1_BILL_TOTAL_ARITHMETIC = "R1_BILL_TOTAL_ARITHMETIC"
 R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH = "R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH"
 R3_POSSIBLE_DUPLICATE_LINE_ITEM = "R3_POSSIBLE_DUPLICATE_LINE_ITEM"
+R6_GFE_PATIENT_AMOUNT_THRESHOLD = "R6_GFE_PATIENT_AMOUNT_THRESHOLD"
 R5_MISSING_INFORMATION = "R5_MISSING_INFORMATION"
 
 # Differences at or above this many cents are "medium" severity; smaller ones "low".
@@ -45,7 +47,7 @@ MEDIUM_DIFFERENCE_CENTS = 5000
 
 BASE_LIMITATIONS = [
     "ClearBill runs a limited set of automated checks (bill arithmetic, bill vs. EOB "
-    "comparison, and possible repeated charges). A flagged difference is a reason to ask "
+    "and GFE comparison, possible repeated charges, and coded-price references). A flagged difference is a reason to ask "
     "questions, not proof of a billing error, and an absence of flags does not mean a bill "
     "is correct.",
     "Amounts were read from your documents by AI and may contain mistakes. Verify every "
@@ -97,9 +99,160 @@ def run_audit(
     findings += _check_bill_arithmetic(bill, ids, limitations)
     if eob is not None:
         findings += _check_insurance_comparison(bill, eob, ids, limitations)
+    if estimate is not None:
+        findings += _check_gfe_comparison(bill, estimate, ids, limitations)
     findings += _check_possible_duplicates(bill, eob, ids)
     findings += _check_missing_information(bill, eob, estimate, ids, limitations)
     return AuditResult(findings=findings, limitations=list(dict.fromkeys(limitations)))
+
+
+GFE_REVIEW_THRESHOLD_CENTS = 40_000
+
+
+def _check_gfe_comparison(
+    bill: DocumentSummary,
+    estimate: DocumentSummary,
+    ids: _IdAllocator,
+    limitations: list[str],
+) -> list[Finding]:
+    """Compare the patient balance to the GFE and flag a $400-or-more increase."""
+    if not (_usable(bill) and _usable(estimate)):
+        return []  # R5 reports an unreadable document.
+
+    mismatches = []
+    bill_provider, estimate_provider = _norm_name(bill.provider_name), _norm_name(estimate.provider_name)
+    if bill_provider and estimate_provider and not (
+        bill_provider == estimate_provider
+        or bill_provider in estimate_provider
+        or estimate_provider in bill_provider
+    ):
+        mismatches.append("provider/facility names differ")
+    if bill.service_date and estimate.service_date and bill.service_date != estimate.service_date:
+        mismatches.append("service dates differ")
+    if mismatches:
+        limitations.append("The bill and Good Faith Estimate were not compared because their " + " and ".join(mismatches) + ".")
+        return [Finding(
+            id=ids.next("gfe"), rule_id=R6_GFE_PATIENT_AMOUNT_THRESHOLD,
+            category=FindingCategory.estimate_comparison,
+            status=FindingStatus.insufficient_information, severity=FindingSeverity.info,
+            title="Bill and Good Faith Estimate may describe different care",
+            explanation="ClearBill did not compare the amounts because the provider/facility or service date does not match clearly.",
+            alternative_explanations=["The estimate may cover a different provider, facility, or service date."],
+            next_step="Confirm that this estimate and bill are for the same provider or facility and the same scheduled service.",
+            difference_cents=None,
+            evidence=[_document_field_ref(bill, "provider_name", None), _document_field_ref(estimate, "provider_name", None)],
+            missing_information=["A Good Faith Estimate for the same provider/facility and service"],
+        )]
+
+    due, expected = bill.amount_due_cents, estimate.expected_total_cents
+    if due is None or expected is None:
+        missing = []
+        evidence = []
+        if due is None:
+            missing.append("The current patient balance due on the bill")
+        else:
+            evidence.append(_document_field_ref(bill, "amount_due_cents", due))
+        if expected is None:
+            missing.append("The total expected patient cost on the Good Faith Estimate")
+        else:
+            evidence.append(_document_field_ref(estimate, "expected_total_cents", expected))
+        limitations.append("The bill and Good Faith Estimate could not be compared because one or both patient amounts were unavailable.")
+        return [Finding(
+            id=ids.next("gfe"), rule_id=R6_GFE_PATIENT_AMOUNT_THRESHOLD,
+            category=FindingCategory.estimate_comparison,
+            status=FindingStatus.insufficient_information, severity=FindingSeverity.info,
+            title="Good Faith Estimate comparison needs more information",
+            explanation="ClearBill could not compare the bill's current patient balance with the estimate's expected patient cost.",
+            alternative_explanations=["The relevant amount may not be printed or may not have been read reliably."],
+            next_step="Check the original bill and estimate for the current patient balance and total expected patient cost.",
+            difference_cents=None, evidence=evidence, missing_information=missing,
+        )]
+
+    difference = due - expected
+    if difference <= 0:
+        return []
+    threshold_met = difference >= GFE_REVIEW_THRESHOLD_CENTS
+    complete = bill.extraction_quality == estimate.extraction_quality == ExtractionQuality.complete
+    findings = Finding(
+        id=ids.next("gfe"), rule_id=R6_GFE_PATIENT_AMOUNT_THRESHOLD,
+        category=FindingCategory.estimate_comparison,
+        status=FindingStatus.needs_review,
+        severity=FindingSeverity.medium if threshold_met else FindingSeverity.info,
+        title=("Patient balance is at least $400 above the Good Faith Estimate" if threshold_met
+               else "Patient balance is above the Good Faith Estimate"),
+        explanation=(
+            f"The bill lists a current patient balance of {format_usd(due)} and the Good Faith Estimate "
+            f"lists expected patient costs of {format_usd(expected)}, a difference of {format_usd(difference)}. "
+            + ("This meets ClearBill's $400 patient-balance review trigger and may warrant checking the Patient-Provider Dispute Resolution process. CMS eligibility is based on charges for the same provider/facility and has additional requirements; this comparison does not determine eligibility. "
+               if threshold_met else "This is below ClearBill's $400 patient-balance review trigger. ")
+            + "Verify both amounts and confirm they cover the same provider/facility and service."
+            + (" The extraction was partial, so check the original documents." if not complete else "")
+        ),
+        alternative_explanations=[
+            "The estimate or bill may include a different set of services, providers, or facilities.",
+            "The patient balance may include payments, adjustments, or other charges not reflected in the estimate total.",
+        ],
+        next_step=(
+            "Ask the provider or facility to reconcile the bill with the estimate. For a possible PPDR request, check CMS eligibility and the 120-day filing deadline at cms.gov/initiatives/your-patient-rights/medical-bill-rights/get-help/dispute-bill."
+            if threshold_met else "Ask the provider to explain the difference and confirm that both documents cover the same services."
+        ),
+        difference_cents=difference,
+        evidence=[
+            _document_field_ref(bill, "amount_due_cents", due),
+            _document_field_ref(estimate, "expected_total_cents", expected),
+        ],
+        missing_information=(
+            ["Whether you were uninsured or chose not to use insurance for this care", "Whether the estimate was provided at least 3 days before scheduled care", "Whether this is an initial bill received within the 120-day filing period", "Whether the bill and estimate cover the same provider/facility and services"]
+            if threshold_met else []
+        ),
+    )
+    return [findings]
+
+
+def price_benchmark_findings(
+    bill: DocumentSummary, averages: dict[str, tuple[int, str]]
+) -> list[Finding]:
+    """Create review prompts for billed coded services far above the CMS baseline."""
+    findings = []
+    for index, item in enumerate(bill.line_items):
+        if not item.code or item.line_total_cents is None or item.line_total_cents <= 0:
+            continue
+        if item.quantity != 1:
+            continue
+        charge_cents = item.unit_amount_cents if item.unit_amount_cents is not None else item.line_total_cents
+        reference = averages.get(item.code.upper())
+        if reference is None:
+            continue
+        average_cents, year = reference
+        if charge_cents <= average_cents * 1.5:
+            continue
+        ratio = charge_cents / average_cents
+        findings.append(Finding(
+            id=f"f-price-{len(findings) + 1}",
+            rule_id="R4_CMS_NATIONAL_PRICE_REFERENCE",
+            category=FindingCategory.price_benchmark,
+            status=FindingStatus.needs_review,
+            severity=FindingSeverity.medium,
+            title="Coded charge is well above the CMS national reference",
+            explanation=(
+                f'Code {item.code} is billed at {format_usd(charge_cents)} per unit, '
+                f'about {ratio:.1f} times the {year} CMS national average submitted charge of '
+                f'{format_usd(average_cents)} for the same code. This benchmark covers Original '
+                "Medicare Part B claims and is a prompt to ask questions, not proof of an error. "
+                "The national figure blends CMS facility and non-facility service averages; your "
+                "care setting is not reliably identified here, and commercial, self-pay, hospital, "
+                "and negotiated prices can differ."
+            ),
+            alternative_explanations=[
+                "The line may include modifiers, multiple units, or components not reflected by the code alone.",
+                "Medicare submitted charges may not represent prices for this provider, insurance plan, or care setting.",
+            ],
+            next_step="Ask the provider for the code, units, care setting, and pricing basis, then compare it with your plan's allowed amount or a matching local estimate.",
+            difference_cents=None,
+            evidence=[_line_ref(bill, index, item, prefix=f"Compare with CMS {year} national reference; verify against")],
+            missing_information=["Whether this service and care setting match the Medicare reference"],
+        ))
+    return findings
 
 
 def evidence_problems(findings: list[Finding], documents: list[DocumentSummary]) -> list[str]:
@@ -198,6 +351,42 @@ def _usable(doc: DocumentSummary | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _check_unit_arithmetic(
+    bill: DocumentSummary, items: list[LineItem], ids: _IdAllocator
+) -> list[Finding]:
+    findings = []
+    for index, item in enumerate(items):
+        if (item.quantity is None or item.unit_amount_cents is None
+                or item.line_total_cents is None or item.line_total_cents < 0):
+            continue
+        expected = item.quantity * item.unit_amount_cents
+        if expected == item.line_total_cents:
+            continue
+        difference = abs(expected - item.line_total_cents)
+        complete = bill.extraction_quality == ExtractionQuality.complete
+        findings.append(Finding(
+            id=ids.next("math"), rule_id=R1_BILL_TOTAL_ARITHMETIC,
+            category=FindingCategory.arithmetic,
+            status=FindingStatus.verified_inconsistency if complete else FindingStatus.needs_review,
+            severity=_severity_for(difference),
+            title="A line item's unit price and quantity do not match its total",
+            explanation=(
+                f'"{item.description}" lists {item.quantity} × {format_usd(item.unit_amount_cents)} '
+                f'but shows a line total of {format_usd(item.line_total_cents)}. The arithmetic '
+                f'difference is {format_usd(difference)}; verify the printed figures.'
+                + (" The extraction was partial, so this needs manual review." if not complete else "")
+            ),
+            alternative_explanations=[
+                "The quantity or unit amount may have been misread during extraction.",
+                "The displayed line total may include a modifier, discount, or other adjustment.",
+            ],
+            next_step="Ask the billing office to explain how this line total was calculated.",
+            difference_cents=difference, evidence=[_line_ref(bill, index, item)],
+            missing_information=[] if complete else ["A fully readable copy of this bill line"],
+        ))
+    return findings
+
+
 def _check_bill_arithmetic(
     bill: DocumentSummary, ids: _IdAllocator, limitations: list[str]
 ) -> list[Finding]:
@@ -216,11 +405,46 @@ def _check_bill_arithmetic(
         reason = "credits or reversals are mixed into the charge lines, so the intended subtotal is unclear"
     if reason:
         limitations.append(f"The bill's line items were not checked against its total because {reason}.")
-        return []
+        return _check_unit_arithmetic(bill, items, ids)
+
+    findings: list[Finding] = []
+    # Check each line's own multiplication before reconciling the statement total.
+    # A missing unit price or quantity means we cannot verify that line.
+    for index, item in enumerate(items):
+        if (item.quantity is None or item.unit_amount_cents is None
+                or item.line_total_cents is None or item.line_total_cents < 0):
+            continue
+        expected = item.quantity * item.unit_amount_cents
+        if expected == item.line_total_cents:
+            continue
+        difference = abs(expected - item.line_total_cents)
+        complete = bill.extraction_quality == ExtractionQuality.complete
+        findings.append(Finding(
+            id=ids.next("math"),
+            rule_id=R1_BILL_TOTAL_ARITHMETIC,
+            category=FindingCategory.arithmetic,
+            status=FindingStatus.verified_inconsistency if complete else FindingStatus.needs_review,
+            severity=_severity_for(difference),
+            title="A line item's unit price and quantity do not match its total",
+            explanation=(
+                f'"{item.description}" lists {item.quantity} × {format_usd(item.unit_amount_cents)} '
+                f'but shows a line total of {format_usd(item.line_total_cents)}. The arithmetic '
+                f'difference is {format_usd(difference)}; verify the printed figures.'
+                + (" The extraction was partial, so this needs manual review." if not complete else "")
+            ),
+            alternative_explanations=[
+                "The quantity or unit amount may have been misread during extraction.",
+                "The displayed line total may include a modifier, discount, or other adjustment.",
+            ],
+            next_step="Ask the billing office to explain how this line total was calculated.",
+            difference_cents=difference,
+            evidence=[_line_ref(bill, index, item)],
+            missing_information=[] if complete else ["A fully readable copy of this bill line"],
+        ))
 
     line_sum = sum(li.line_total_cents for li in items)  # type: ignore[misc]
     if line_sum == total:
-        return []
+        return findings
 
     difference = abs(line_sum - total)
     complete = bill.extraction_quality == ExtractionQuality.complete
@@ -239,7 +463,7 @@ def _check_bill_arithmetic(
     if line_sum > total:
         alternatives.append("A discount may already be reflected in the total charges.")
 
-    return [
+    return findings + [
         Finding(
             id=ids.next("math"),
             rule_id=R1_BILL_TOTAL_ARITHMETIC,
@@ -275,16 +499,21 @@ def _eob_state(status: str | None) -> str:
 
 
 def _match_claim(bill: DocumentSummary, eob: DocumentSummary) -> str:
-    """'claim' (same claim number), 'visit' (same provider + date), 'conflict', or 'unknown'."""
+    """Match by claim ID or provider/date while preserving conflicting-ID context."""
     bill_claim, eob_claim = _norm_id(bill.claim_number), _norm_id(eob.claim_number)
-    if bill_claim and eob_claim:
-        return "claim" if bill_claim == eob_claim else "conflict"
     bill_provider, eob_provider = _norm_name(bill.provider_name), _norm_name(eob.provider_name)
     same_provider = bool(bill_provider and eob_provider) and (
         bill_provider == eob_provider or bill_provider in eob_provider or eob_provider in bill_provider
     )
     same_date = bill.service_date is not None and bill.service_date == eob.service_date
-    return "visit" if same_provider and same_date else "unknown"
+    same_visit = same_provider and same_date
+    if bill_claim and eob_claim:
+        if bill_claim == eob_claim:
+            return "claim"
+        # EOBs and provider statements may label different identifiers as the
+        # claim number. Compare provisionally only when provider and date agree.
+        return "visit_conflict" if same_visit else "conflict"
+    return "visit" if same_visit else "unknown"
 
 
 def _check_insurance_comparison(
@@ -294,9 +523,7 @@ def _check_insurance_comparison(
         return []  # R5 reports the unreadable document
 
     match = _match_claim(bill, eob)
-    if match in ("conflict", "unknown"):
-        limitations.append("The bill and EOB could not be matched to the same claim, so their amounts were not compared.")
-        return [_unmatched_finding(bill, eob, match, ids)]
+    match_unverified = match in ("conflict", "unknown")
 
     state = _eob_state(eob.eob_status)
     if state == "pending":
@@ -306,8 +533,20 @@ def _check_insurance_comparison(
     due, responsibility = bill.amount_due_cents, eob.patient_responsibility_cents
     if due is None or responsibility is None:
         limitations.append("The bill's amount due and the EOB's patient responsibility could not both be found, so they were not compared.")
-        return [_missing_amounts_finding(bill, eob, ids)]
+        finding = _missing_amounts_finding(bill, eob, ids)
+        if match_unverified:
+            finding.explanation += (
+                " The claim match is also unverified; compare the extracted identifiers below "
+                "with the documents."
+            )
+            finding.missing_information.append(
+                "Confirmation that the uploaded bill and EOB refer to the same claim or visit"
+            )
+            finding.evidence.extend(_claim_refs(bill, eob))
+        return [finding]
     if due == responsibility:
+        if match_unverified:
+            return [_unverified_equal_amounts_finding(bill, eob, due, responsibility, ids)]
         return []
 
     difference = abs(due - responsibility)
@@ -315,6 +554,10 @@ def _check_insurance_comparison(
     service_date = bill.service_date or eob.service_date
     if match == "claim":
         lead = f"For matching Claim {claim}"
+    elif match == "visit_conflict":
+        lead = "For the same provider and service date, although the printed claim identifiers differ"
+    elif match_unverified:
+        lead = "For the uploaded bill and EOB pair (claim match not verified)"
     else:
         lead = "For what appears to be the same visit (same provider and service date)"
     if service_date:
@@ -325,6 +568,15 @@ def _check_insurance_comparison(
         f"{eob_label} lists {format_usd(responsibility)} in patient responsibility. This "
         f"{format_usd(difference)} difference warrants clarification; it does not prove an improper charge."
     )
+    if match == "visit_conflict":
+        explanation += (
+            f" The bill lists identifier {bill.claim_number}; the EOB lists {eob.claim_number}."
+        )
+    elif match_unverified:
+        explanation += (
+            " ClearBill could not verify that the documents cover the same claim, so treat this "
+            "amount difference as a preliminary comparison until the provider or insurer confirms the match."
+        )
 
     if due > responsibility:
         eob_dated = f" (dated {eob.document_date})" if eob.document_date else ""
@@ -334,11 +586,30 @@ def _check_insurance_comparison(
             f"posted to the provider statement{bill_dated}.",
             "The provider statement balance may include prior balances or services from a separate claim.",
         ]
-        claim_part = f" for Claim {claim}" if claim else ""
-        next_step = (
-            "Ask the provider billing office for an updated itemized account statement that "
-            f"reconciles the {format_usd(due)} balance with {eob_label}{claim_part}."
-        )
+        if match_unverified:
+            alternatives.append(
+                "The EOB may refer to a different claim; confirm the match before acting on this comparison."
+            )
+        if match_unverified:
+            next_step = (
+                "Ask the provider or insurer to confirm that the uploaded EOB covers this bill, then "
+                "request an updated itemized statement reconciling the amounts."
+            )
+        elif match == "visit_conflict":
+            alternatives.append(
+                "The two documents may use different claim or account identifiers for the same visit."
+            )
+            next_step = (
+                "Ask the provider or insurer to confirm that the differing identifiers refer to "
+                "the same claim, then request an updated itemized statement reconciling the "
+                f"{format_usd(due)} balance with {eob_label}."
+            )
+        else:
+            claim_part = f" for Claim {claim}" if claim else ""
+            next_step = (
+                "Ask the provider billing office for an updated itemized account statement that "
+                f"reconciles the {format_usd(due)} balance with {eob_label}{claim_part}."
+            )
     else:
         alternatives = [
             "A payment you already made (for example, a copay at the visit) may have been applied to the statement.",
@@ -352,6 +623,13 @@ def _check_insurance_comparison(
     missing = []
     if match == "visit":
         missing.append("A claim number shown on both documents to confirm they are the same claim")
+    elif match == "visit_conflict":
+        missing.append(
+            f"Confirmation that bill identifier {bill.claim_number} and EOB identifier "
+            f"{eob.claim_number} refer to the same claim"
+        )
+    elif match_unverified:
+        missing.append("Confirmation that the uploaded bill and EOB refer to the same claim or visit")
     if state == "unknown":
         missing.append("A final claim status on the EOB")
 
@@ -388,38 +666,34 @@ def _claim_refs(bill: DocumentSummary, eob: DocumentSummary) -> list[EvidenceRef
     return refs
 
 
-def _unmatched_finding(
-    bill: DocumentSummary, eob: DocumentSummary, match: str, ids: _IdAllocator
+def _unverified_equal_amounts_finding(
+    bill: DocumentSummary,
+    eob: DocumentSummary,
+    due: int,
+    responsibility: int,
+    ids: _IdAllocator,
 ) -> Finding:
-    if match == "conflict":
-        explanation = (
-            f"The bill shows claim number {bill.claim_number} but the EOB shows {eob.claim_number}, "
-            "so ClearBill did not compare their amounts. They may describe different visits or claims."
-        )
-    else:
-        explanation = (
-            "The bill and EOB do not share a claim number, and their provider and service date do "
-            "not clearly match, so ClearBill did not compare their amounts."
-        )
+    """Report equal uploaded amounts without claiming the documents are matched."""
     return Finding(
         id=ids.next("eob"),
         rule_id=R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH,
         category=FindingCategory.insurance_comparison,
         status=FindingStatus.insufficient_information,
         severity=FindingSeverity.info,
-        title="Bill and EOB could not be matched to the same claim",
-        explanation=explanation,
-        alternative_explanations=[
-            "The EOB may be for a different visit or a different claim from the same provider.",
-            "One document may show an account number instead of the insurer's claim number.",
-        ],
-        next_step=(
-            "Check that the EOB is for the same visit as the bill (same provider and date of "
-            "service). If it is, ask the billing office which claim the statement balance belongs to."
+        title="Patient amounts match, but the claim match needs confirmation",
+        explanation=(
+            f"The bill and uploaded EOB both show {format_usd(due)} as the patient amount. "
+            "ClearBill could not verify that they cover the same claim, so confirm the match "
+            "before treating the amounts as reconciled."
         ),
-        difference_cents=None,
-        evidence=_claim_refs(bill, eob),
-        missing_information=["A claim number, provider, and service date that match on both documents"],
+        alternative_explanations=[],
+        next_step="Ask the provider or insurer to confirm that this EOB belongs to the uploaded bill.",
+        difference_cents=abs(due - responsibility),
+        evidence=[
+            _document_field_ref(bill, "amount_due_cents", due),
+            _document_field_ref(eob, "patient_responsibility_cents", responsibility),
+        ],
+        missing_information=["Confirmation that the uploaded bill and EOB refer to the same claim or visit"],
     )
 
 
@@ -651,25 +925,21 @@ def _check_missing_information(
                 severity=FindingSeverity.info,
                 title="Insurance comparison not available",
                 explanation=(
-                    "No Explanation of Benefits (EOB) was uploaded, so ClearBill could not compare the "
-                    "bill with how your insurance processed the claim. Bill-only checks were still run."
+                    "No readable Explanation of Benefits (EOB) was available, so ClearBill could not "
+                    "compare the bill with how your insurance processed the claim. Other available checks were still run."
                 ),
                 alternative_explanations=[
                     "If the visit was self-pay or not billed to insurance, there may be no EOB.",
                 ],
                 next_step=(
-                    "If you have insurance, find the EOB for this visit in your insurer's member portal "
-                    "or mail and upload it together with the bill."
+                    "If you have insurance, make sure the EOB for this visit is readable and upload it "
+                    "together with the bill. You can also check it in your insurer's member portal or mail."
                 ),
                 difference_cents=None,
                 evidence=[],
                 missing_information=["Explanation of Benefits (EOB) for this visit"],
             )
         )
-        limitations.append("No EOB was provided, so the bill could not be compared with how insurance processed the claim.")
+        limitations.append("No readable EOB was available, so the bill could not be compared with how insurance processed the claim.")
 
-    if estimate is not None:
-        limitations.append(
-            "Good Faith Estimate comparison is not supported in this version; the estimate was read but not compared with the bill."
-        )
     return findings

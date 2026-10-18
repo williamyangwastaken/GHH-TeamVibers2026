@@ -1,4 +1,4 @@
-"""Gemini prompts for document extraction.
+"""Model instructions for document extraction.
 
 The model only transcribes what is printed. All arithmetic, unit conversion
 (dollars -> cents), date normalization, and judgement about discrepancies
@@ -59,6 +59,7 @@ Field guidance:
 The user uploaded this file as an insurance EXPLANATION OF BENEFITS (EOB).
 Field guidance:
 - provider_name: the provider the claim is for; insurer_name: the plan or insurer.
+- claim_number: the insurer/provider claim identifier, not a member ID, group number, patient account number, authorization number, or generic reference number. If unclear, return null.
 - total_charges: total amount billed by the provider, if printed.
 - insurance_paid: total amount the plan paid.
 - adjustments: total discounts, "not allowed" amounts, or provider adjustments.
