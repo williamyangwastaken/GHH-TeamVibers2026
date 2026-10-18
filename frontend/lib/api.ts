@@ -13,7 +13,7 @@ import type {
   LetterResponse,
 } from "./types";
 
-export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001").replace(/\/+$/, "");
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "");
 const API_PREFIX = "/api/v1";
 
 const DEMO_TIMEOUT_MS = 4_000;

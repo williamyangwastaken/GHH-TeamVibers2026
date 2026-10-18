@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: ClearBill AI API
+  title: Sana API
   version: 1.0.0
   description: >
-    Frozen OpenAPI 3.0 specification for ClearBill AI (Girls Hoo Hack 2026).
+    Frozen OpenAPI 3.0 specification for Sana (Girls Hoo Hack 2026).
     Provides multimodal medical bill/EOB extraction, deterministic discrepancy auditing,
     and evidence-grounded clarification letter drafting on synthetic data.
 servers:

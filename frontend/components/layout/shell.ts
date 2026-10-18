@@ -4,11 +4,10 @@ import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, type MouseEvent } from "react";
 
 export interface ShellActions {
-  openHelp: () => void;
   openSignIn: () => void;
 }
 
-export const ShellContext = createContext<ShellActions>({ openHelp: () => {}, openSignIn: () => {} });
+export const ShellContext = createContext<ShellActions>({ openSignIn: () => {} });
 
 export function useShell(): ShellActions {
   return useContext(ShellContext);

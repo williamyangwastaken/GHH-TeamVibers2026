@@ -1,6 +1,6 @@
 """Ephemeral in-memory store of analyses, so /letters can reuse server-held findings.
 
-Prototype limitations (by design, see CONTRACT.md / handoff section 8):
+Prototype limitations (by design):
   * single process only: run uvicorn with one worker;
   * cases expire after CASE_TTL_MINUTES (default 60) and vanish on restart;
   * only normalized analysis JSON is kept, never uploaded file bytes.

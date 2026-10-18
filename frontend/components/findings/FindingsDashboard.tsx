@@ -96,7 +96,7 @@ export function FindingsDashboard({
                 <KindTile kind={doc.kind} />
                 <div className="meta">
                   <div className="name">{KIND_LABEL[doc.kind]}</div>
-                  <div className="fn">
+                  <div className="fn" title={doc.filename}>
                     {doc.filename} · {doc.pages} page{doc.pages === 1 ? "" : "s"}
                   </div>
                 </div>

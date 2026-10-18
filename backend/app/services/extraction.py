@@ -1,6 +1,6 @@
 """Document extraction: upload validation -> Groq structured output -> DocumentSummary.
 
-Public API (frozen in CONTRACT.md):
+Public API:
 
     await extract_document(content, content_type, filename, kind) -> DocumentSummary
 

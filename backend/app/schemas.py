@@ -1,4 +1,4 @@
-"""Canonical Pydantic v2 models for ClearBill AI.
+"""Canonical Pydantic v2 models for Sana.
 
 Public API models mirror ``components.schemas`` in ``api_contract.yaml`` exactly
 (field names, required/nullable, enums). The contract is frozen: change the YAML

@@ -18,7 +18,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const toast = useToast();
-  const { openHelp, openSignIn } = useShell();
+  const { openSignIn } = useShell();
   const onHowItWorks = useHowItWorksClick();
   const { user, signOut, analysis, loadSample } = useAppState();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -72,9 +72,6 @@ export function SiteHeader() {
           <Link href="/#how" onClick={onHowItWorks}>
             How It Works
           </Link>
-          <button type="button" onClick={openHelp}>
-            Help
-          </button>
         </nav>
         <button
           ref={avatarRef}
@@ -96,16 +93,6 @@ export function SiteHeader() {
           )}
           <button role="menuitem" type="button" onClick={openMyBills}>
             My Bills
-          </button>
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              setMenuOpen(false);
-              openHelp();
-            }}
-          >
-            Help
           </button>
           <button
             role="menuitem"

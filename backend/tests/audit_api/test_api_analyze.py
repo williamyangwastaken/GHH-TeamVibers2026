@@ -55,7 +55,7 @@ def test_bill_and_eob_produce_findings_and_a_stored_case(client, fake_extract):
     assert "$640.00" in letter.json()["body"]
 
 
-def test_bill_and_eob_extractions_are_serialized(client, monkeypatch):
+def test_bill_and_eob_extractions_run_concurrently(client, monkeypatch):
     import asyncio
 
     bill, eob = demo_documents()
@@ -66,7 +66,7 @@ def test_bill_and_eob_extractions_are_serialized(client, monkeypatch):
         nonlocal active, max_active
         active += 1
         max_active = max(max_active, active)
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.01)
         active -= 1
         return {"bill": bill, "eob": eob}[str(kind)].model_copy(update={"filename": filename})
 
@@ -74,7 +74,7 @@ def test_bill_and_eob_extractions_are_serialized(client, monkeypatch):
     monkeypatch.setattr("app.services.price_benchmark.national_average_charge", lambda code: None)
     response = client.post("/api/v1/analyze", files=files(bill=(blank_pdf(), PDF), eob=(blank_pdf(), PDF)))
     assert response.status_code == 200, response.text
-    assert max_active == 1
+    assert max_active == 2
     assert any(f["rule_id"] == "R2_EOB_PATIENT_RESPONSIBILITY_MISMATCH" for f in response.json()["findings"])
 
 

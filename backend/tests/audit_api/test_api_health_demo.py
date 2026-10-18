@@ -57,7 +57,27 @@ def test_cors_origin_is_configurable(monkeypatch):
 
     from app.main import create_app
 
-    monkeypatch.setenv("FRONTEND_ORIGIN", "https://clearbill.example, https://preview.example/")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://sana.example, https://preview.example/")
     with TestClient(create_app()) as client:
         response = client.get("/api/v1/health", headers={"Origin": "https://preview.example"})
     assert response.headers["access-control-allow-origin"] == "https://preview.example"
+
+
+def test_unexpected_500_keeps_cors_headers_so_the_browser_can_read_it():
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    app = create_app()
+
+    @app.get("/api/v1/boom")
+    def boom():
+        raise RuntimeError("unexpected")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        allowed = client.get("/api/v1/boom", headers={"Origin": "http://localhost:3000"})
+        unknown = client.get("/api/v1/boom", headers={"Origin": "https://evil.example"})
+    assert allowed.status_code == 500
+    assert allowed.json()["error"]["code"] == "INTERNAL_ERROR"
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert "access-control-allow-origin" not in unknown.headers

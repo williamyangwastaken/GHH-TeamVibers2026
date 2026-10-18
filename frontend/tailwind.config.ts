@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss";
 
 // Design tokens come from the CSS variables in app/globals.css (ported verbatim
-// from public/demo/prototype/clearbill.html), so utilities and the prototype's
+// from the original prototype), so utilities and the prototype's
 // component classes always share one palette.
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],

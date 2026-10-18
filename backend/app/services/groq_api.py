@@ -5,17 +5,23 @@ extracted locally with pypdf. Sparse/scanned pages are rendered to images and
 sent to a vision model in groups of at most three pages.
 
 Configuration:
-  GROQ_API_KEY          preferred Groq API key variable
+  GROQ_API_KEY          primary Groq API key
+  GROQ_API_KEY_1..N     additional keys (GROQ_API_KEY_2, ...)
+  GROQ_API_KEYS         optional comma-separated list of keys
   GROQ_MODEL            optional model ID (defaults to qwen/qwen3.8-27b)
-  GROQ_TIMEOUT_SECONDS  optional per-request timeout (defaults to 90 seconds)
+  GROQ_TIMEOUT_SECONDS  optional per-request timeout (defaults to 25 seconds)
+
+Keys are pooled and deduplicated. Initial attempts rotate round-robin across the
+pool; a 429/5xx/timeout moves to the next key immediately, with no sleeping and
+no hidden SDK-style retries (equivalent to max_retries=0).
 
 """
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import io
+import itertools
 import json
 import logging
 import os
@@ -39,12 +45,12 @@ logger = logging.getLogger(__name__)
 
 API_URL = "https://api.groq.com/openai/v1/chat/completions"
 DEFAULT_MODEL = "qwen/qwen3.8-27b"
-DEFAULT_TIMEOUT_SECONDS = 90.0
-MAX_RETRIES = 2
-RETRY_BASE_DELAY_SECONDS = 1.0
-# Small Groq free/on-demand tiers can require waiting through most of a
-# one-minute token window between sequential document extractions.
+DEFAULT_TIMEOUT_SECONDS = 25.0
+# Retry-After is only read for diagnostics; we fail over to another key rather
+# than sleeping through a rate-limit window.
 MAX_AUTOMATIC_RETRY_AFTER_SECONDS = 65.0
+TRANSIENT_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+_key_cursor = itertools.count()
 MAX_IMAGES_PER_REQUEST = 3
 MAX_COMPLETION_TOKENS = 900
 OCR_PAGES_PER_REQUEST = 1
@@ -140,8 +146,20 @@ async def _extract_eob_summary(
     )
 
 
-def _api_key() -> str:
-    return (os.getenv("GROQ_API_KEY") or "").strip()
+def _api_keys() -> list[str]:
+    """Distinct non-empty keys from every supported variable, in a stable order."""
+    numbered = sorted(
+        (name for name in os.environ if re.fullmatch(r"GROQ_API_KEY_\d+", name)),
+        key=lambda name: int(name.rsplit("_", 1)[1]),
+    )
+    raw: list[str] = [os.getenv("GROQ_API_KEY") or ""]
+    raw += [os.getenv(name) or "" for name in numbered]
+    raw += (os.getenv("GROQ_API_KEYS") or "").split(",")
+    return list(dict.fromkeys(key.strip() for key in raw if key.strip()))
+
+
+def _mask_key(key: str) -> str:
+    return f"gsk_...{key[-3:]}"
 
 
 def _model_name() -> str:
@@ -149,8 +167,8 @@ def _model_name() -> str:
 
 
 def is_configured() -> bool:
-    """True when a key is present; the model has a safe Groq default."""
-    return bool(_api_key())
+    """True when at least one key is present; the model has a safe Groq default."""
+    return bool(_api_keys())
 
 
 def _timeout_seconds() -> float:
@@ -170,10 +188,6 @@ def _unavailable(*, retryable: bool, status: int = 503) -> ExtractionError:
         http_status=status,
         retryable=retryable,
     )
-
-
-async def _backoff(attempt: int) -> None:
-    await asyncio.sleep(RETRY_BASE_DELAY_SECONDS * (2**attempt))
 
 
 def _retry_after_seconds(response: httpx.Response) -> float | None:
@@ -273,25 +287,30 @@ async def _chat(
         payload["max_completion_tokens"] = max_completion_tokens
 
     timeout = timeout_seconds or _timeout_seconds()
-    headers = {"Authorization": f"Bearer {_api_key()}"}
-    for attempt in range(MAX_RETRIES + 1):
+    keys = _api_keys()
+    logger.info("Groq key pool: %d distinct key(s) [%s]", len(keys), ", ".join(_mask_key(k) for k in keys))
+    # Round-robin the starting key so concurrent/sequential documents spread token
+    # usage across accounts, then fail over through the pool without sleeping.
+    first = next(_key_cursor)
+    attempts = max(len(keys), 2)
+    last_error: ExtractionError | None = None
+    for attempt in range(attempts):
+        key = keys[(first + attempt) % len(keys)]
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(API_URL, headers=headers, json=payload)
+                response = await client.post(
+                    API_URL, headers={"Authorization": f"Bearer {key}"}, json=payload
+                )
             if response.status_code >= 400:
-                if _is_daily_token_limit(response):
-                    raise _map_api_error(response)
-                if response.status_code in (408, 429, 500, 502, 503, 504) and attempt < MAX_RETRIES:
-                    retry_after = _retry_after_seconds(response) if response.status_code == 429 else None
-                    if retry_after is not None and retry_after > MAX_AUTOMATIC_RETRY_AFTER_SECONDS:
-                        raise _map_api_error(response)
-                    logger.info("Groq returned HTTP %d; retrying (attempt %d)", response.status_code, attempt + 1)
-                    if retry_after is not None:
-                        await asyncio.sleep(retry_after)
-                    else:
-                        await _backoff(attempt)
+                error = _map_api_error(response)
+                if response.status_code in TRANSIENT_STATUSES or response.status_code >= 500:
+                    logger.info(
+                        "Groq HTTP %d on key %s; switching key (attempt %d/%d)",
+                        response.status_code, _mask_key(key), attempt + 1, attempts,
+                    )
+                    last_error = error
                     continue
-                raise _map_api_error(response)
+                raise error
             body = response.json()
             message = body["choices"][0]["message"]
             text = message.get("content")
@@ -306,12 +325,12 @@ async def _chat(
         except ExtractionError:
             raise
         except (TimeoutError, httpx.TimeoutException, httpx.TransportError) as exc:
-            if attempt < MAX_RETRIES:
-                logger.info("Groq request failed (%s); retrying (attempt %d)", type(exc).__name__, attempt + 1)
-                await _backoff(attempt)
-                continue
-            logger.warning("Groq request failed after retries (%s)", type(exc).__name__)
-            raise _unavailable(retryable=True) from exc
+            logger.info(
+                "Groq request failed (%s) on key %s; switching key (attempt %d/%d)",
+                type(exc).__name__, _mask_key(key), attempt + 1, attempts,
+            )
+            last_error = _unavailable(retryable=True)
+            last_error.__cause__ = exc
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             logger.warning("Groq returned an unusable response (%s)", type(exc).__name__)
             raise ExtractionError(
@@ -320,7 +339,8 @@ async def _chat(
                 http_status=502,
                 retryable=True,
             ) from None
-    raise AssertionError("unreachable")  # pragma: no cover
+    assert last_error is not None
+    raise last_error
 
 
 def _map_api_error(response: httpx.Response) -> ExtractionError:

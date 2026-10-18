@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useHowItWorksClick, useShell } from "./shell";
+import { useHowItWorksClick } from "./shell";
 
 export function SiteFooter() {
-  const { openHelp } = useShell();
   const onHowItWorks = useHowItWorksClick();
 
   return (
@@ -20,9 +19,6 @@ export function SiteFooter() {
             How it works
           </Link>
           <Link href="/results">My Bills</Link>
-          <button type="button" onClick={openHelp}>
-            Help
-          </button>
         </nav>
         <div className="credit">Girls Hoo Hack 2026 · Team Vibers</div>
       </div>

@@ -94,8 +94,16 @@ export function EvidencePanel({
                             {doc ? KIND_LABEL[doc.kind] : ref.document_id} · {label}
                           </div>
                           <div className="amt">{formatCents(ref.amount_cents)}</div>
-                          <button type="button" className="src-chip" onClick={() => showSource(ref.document_id)}>
-                            <FileText size={13} aria-hidden="true" /> {doc?.filename ?? ref.document_id} · p. {ref.page ?? "?"}
+                          <button
+                            type="button"
+                            className="src-chip"
+                            title={doc?.filename ?? ref.document_id}
+                            onClick={() => showSource(ref.document_id)}
+                          >
+                            <FileText size={13} aria-hidden="true" className="shrink-0" />
+                            <span>
+                              {doc?.filename ?? ref.document_id} · p. {ref.page ?? "?"}
+                            </span>
                           </button>
                           {ref.source_text && <div className="quote">“{ref.source_text}”</div>}
                         </div>

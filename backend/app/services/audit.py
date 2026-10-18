@@ -46,7 +46,7 @@ R5_MISSING_INFORMATION = "R5_MISSING_INFORMATION"
 MEDIUM_DIFFERENCE_CENTS = 5000
 
 BASE_LIMITATIONS = [
-    "ClearBill runs a limited set of automated checks (bill arithmetic, bill vs. EOB "
+    "Sana runs a limited set of automated checks (bill arithmetic, bill vs. EOB "
     "and GFE comparison, possible repeated charges, and coded-price references). A flagged difference is a reason to ask "
     "questions, not proof of a billing error, and an absence of flags does not mean a bill "
     "is correct.",
@@ -136,7 +136,7 @@ def _check_gfe_comparison(
             category=FindingCategory.estimate_comparison,
             status=FindingStatus.insufficient_information, severity=FindingSeverity.info,
             title="Bill and Good Faith Estimate may describe different care",
-            explanation="ClearBill did not compare the amounts because the provider/facility or service date does not match clearly.",
+            explanation="Sana did not compare the amounts because the provider/facility or service date does not match clearly.",
             alternative_explanations=["The estimate may cover a different provider, facility, or service date."],
             next_step="Confirm that this estimate and bill are for the same provider or facility and the same scheduled service.",
             difference_cents=None,
@@ -162,7 +162,7 @@ def _check_gfe_comparison(
             category=FindingCategory.estimate_comparison,
             status=FindingStatus.insufficient_information, severity=FindingSeverity.info,
             title="Good Faith Estimate comparison needs more information",
-            explanation="ClearBill could not compare the bill's current patient balance with the estimate's expected patient cost.",
+            explanation="Sana could not compare the bill's current patient balance with the estimate's expected patient cost.",
             alternative_explanations=["The relevant amount may not be printed or may not have been read reliably."],
             next_step="Check the original bill and estimate for the current patient balance and total expected patient cost.",
             difference_cents=None, evidence=evidence, missing_information=missing,
@@ -183,8 +183,8 @@ def _check_gfe_comparison(
         explanation=(
             f"The bill lists a current patient balance of {format_usd(due)} and the Good Faith Estimate "
             f"lists expected patient costs of {format_usd(expected)}, a difference of {format_usd(difference)}. "
-            + ("This meets ClearBill's $400 patient-balance review trigger and may warrant checking the Patient-Provider Dispute Resolution process. CMS eligibility is based on charges for the same provider/facility and has additional requirements; this comparison does not determine eligibility. "
-               if threshold_met else "This is below ClearBill's $400 patient-balance review trigger. ")
+            + ("This meets Sana's $400 patient-balance review trigger and may warrant checking the Patient-Provider Dispute Resolution process. CMS eligibility is based on charges for the same provider/facility and has additional requirements; this comparison does not determine eligibility. "
+               if threshold_met else "This is below Sana's $400 patient-balance review trigger. ")
             + "Verify both amounts and confirm they cover the same provider/facility and service."
             + (" The extraction was partial, so check the original documents." if not complete else "")
         ),
@@ -574,7 +574,7 @@ def _check_insurance_comparison(
         )
     elif match_unverified:
         explanation += (
-            " ClearBill could not verify that the documents cover the same claim, so treat this "
+            " Sana could not verify that the documents cover the same claim, so treat this "
             "amount difference as a preliminary comparison until the provider or insurer confirms the match."
         )
 
@@ -683,7 +683,7 @@ def _unverified_equal_amounts_finding(
         title="Patient amounts match, but the claim match needs confirmation",
         explanation=(
             f"The bill and uploaded EOB both show {format_usd(due)} as the patient amount. "
-            "ClearBill could not verify that they cover the same claim, so confirm the match "
+            "Sana could not verify that they cover the same claim, so confirm the match "
             "before treating the amounts as reconciled."
         ),
         alternative_explanations=[],
@@ -712,7 +712,7 @@ def _pending_eob_finding(bill: DocumentSummary, eob: DocumentSummary, ids: _IdAl
         title="EOB is not final yet",
         explanation=(
             f'The EOB lists the claim status as "{eob.eob_status}", so the patient responsibility may '
-            "still change. ClearBill did not treat any difference from the bill as a discrepancy."
+            "still change. Sana did not treat any difference from the bill as a discrepancy."
         ),
         alternative_explanations=[
             "Insurers often update the patient responsibility once a claim finishes processing.",
@@ -746,7 +746,7 @@ def _missing_amounts_finding(bill: DocumentSummary, eob: DocumentSummary, ids: _
         severity=FindingSeverity.info,
         title="Bill and EOB amounts could not be compared",
         explanation=(
-            "ClearBill could not find "
+            "Sana could not find "
             + " or ".join(m[0].lower() + m[1:] for m in missing)
             + ", so the amount you are asked to pay could not be compared with the amount your "
             "insurer says you owe."
@@ -891,7 +891,7 @@ def _check_missing_information(
                     severity=FindingSeverity.info,
                     title=f"The {label} could not be read",
                     explanation=(
-                        f"ClearBill could not extract billing amounts from {doc.filename}, so checks "
+                        f"Sana could not extract billing amounts from {doc.filename}, so checks "
                         "that depend on it were skipped."
                     ),
                     alternative_explanations=[
@@ -925,7 +925,7 @@ def _check_missing_information(
                 severity=FindingSeverity.info,
                 title="Insurance comparison not available",
                 explanation=(
-                    "No readable Explanation of Benefits (EOB) was available, so ClearBill could not "
+                    "No readable Explanation of Benefits (EOB) was available, so Sana could not "
                     "compare the bill with how your insurance processed the claim. Other available checks were still run."
                 ),
                 alternative_explanations=[
